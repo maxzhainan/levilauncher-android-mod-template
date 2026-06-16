@@ -1,0 +1,110 @@
+cmake_minimum_required(VERSION 3.22)
+
+project(levilauncher_android_mod_template LANGUAGES CXX)
+
+if(NOT ANDROID)
+    message(FATAL_ERROR "This template must be built with the Android NDK CMake toolchain.")
+endif()
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+set(MOD_ID "my-mod" CACHE STRING "LeviLauncher mod package directory name")
+set(MOD_NAME "My Mod" CACHE STRING "LeviLauncher mod display name")
+set(MOD_AUTHOR "LiteLDev" CACHE STRING "LeviLauncher mod author")
+set(MOD_VERSION "0.1.0" CACHE STRING "LeviLauncher mod version")
+set(MOD_LIBRARY_NAME "my_mod" CACHE STRING "Native library name without lib prefix or .so suffix")
+set(MOD_MINECRAFT_VERSIONS "[\"1.21.*\"]" CACHE STRING "Raw JSON array for manifest minecraft_versions")
+set(MOD_ICON "" CACHE STRING "Optional package-relative icon path, such as icon.png")
+
+set(DEFAULT_LEVI_PRELOADER_ROOT "D:/a/LiteLDev/LeviLaunchroid/app/src/main/cpp/preloader")
+if(DEFINED ENV{LEVI_PRELOADER_ROOT} AND NOT "$ENV{LEVI_PRELOADER_ROOT}" STREQUAL "")
+    set(DEFAULT_LEVI_PRELOADER_ROOT "$ENV{LEVI_PRELOADER_ROOT}")
+endif()
+set(LEVI_PRELOADER_ROOT "${DEFAULT_LEVI_PRELOADER_ROOT}" CACHE PATH "Path to LeviLaunchroid preloader root")
+
+if(NOT EXISTS "${LEVI_PRELOADER_ROOT}/src/pl/cpp/Mod.hpp")
+    message(FATAL_ERROR "LEVI_PRELOADER_ROOT must point to app/src/main/cpp/preloader")
+endif()
+
+if(NOT CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a" AND
+   NOT CMAKE_ANDROID_ARCH_ABI STREQUAL "armeabi-v7a")
+    message(FATAL_ERROR "Unsupported Android ABI: ${CMAKE_ANDROID_ARCH_ABI}")
+endif()
+
+add_library(${MOD_LIBRARY_NAME} SHARED
+    src/main.cpp
+    src/mod/MyMod.cpp
+)
+
+set_target_properties(${MOD_LIBRARY_NAME} PROPERTIES
+    OUTPUT_NAME "${MOD_LIBRARY_NAME}"
+)
+
+target_include_directories(${MOD_LIBRARY_NAME}
+    PRIVATE
+        src
+        "${LEVI_PRELOADER_ROOT}/src"
+)
+
+target_compile_options(${MOD_LIBRARY_NAME}
+    PRIVATE
+        $<$<COMPILE_LANG_AND_ID:CXX,Clang,GNU>:-fvisibility=hidden -fvisibility-inlines-hidden>
+)
+
+target_link_options(${MOD_LIBRARY_NAME}
+    PRIVATE
+        "-Wl,-z,max-page-size=16384"
+)
+
+find_library(log-lib log REQUIRED)
+target_link_libraries(${MOD_LIBRARY_NAME} PRIVATE ${log-lib})
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/manifest.json"
+    @ONLY
+)
+
+set(LEVI_PACKAGE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/package")
+set(LEVI_PACKAGE_MOD_DIR "${LEVI_PACKAGE_ROOT}/${MOD_ID}")
+set(LEVI_PACKAGE_FILE "${CMAKE_CURRENT_BINARY_DIR}/${MOD_ID}-${MOD_VERSION}-${CMAKE_ANDROID_ARCH_ABI}.levipack")
+set(LEVI_PACKAGE_ICON_COMMAND)
+
+if(NOT MOD_ICON STREQUAL "")
+    if(IS_ABSOLUTE "${MOD_ICON}")
+        message(FATAL_ERROR "MOD_ICON must be a package-relative path")
+    endif()
+
+    if(MOD_ICON MATCHES "(^|/)\\.\\.(/|$)")
+        message(FATAL_ERROR "MOD_ICON must not contain ..")
+    endif()
+
+    set(MOD_ICON_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${MOD_ICON}")
+    if(NOT EXISTS "${MOD_ICON_SOURCE}")
+        message(FATAL_ERROR "MOD_ICON does not exist: ${MOD_ICON_SOURCE}")
+    endif()
+
+    get_filename_component(MOD_ICON_DIR "${MOD_ICON}" DIRECTORY)
+    if(NOT MOD_ICON_DIR STREQUAL "")
+        list(APPEND LEVI_PACKAGE_ICON_COMMAND
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${LEVI_PACKAGE_MOD_DIR}/${MOD_ICON_DIR}")
+    endif()
+    list(APPEND LEVI_PACKAGE_ICON_COMMAND
+        COMMAND "${CMAKE_COMMAND}" -E copy "${MOD_ICON_SOURCE}" "${LEVI_PACKAGE_MOD_DIR}/${MOD_ICON}")
+endif()
+
+add_custom_target(levi_package
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${LEVI_PACKAGE_ROOT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${LEVI_PACKAGE_MOD_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:${MOD_LIBRARY_NAME}>" "${LEVI_PACKAGE_MOD_DIR}/lib${MOD_LIBRARY_NAME}.so"
+    COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_BINARY_DIR}/manifest.json" "${LEVI_PACKAGE_MOD_DIR}/manifest.json"
+    ${LEVI_PACKAGE_ICON_COMMAND}
+    COMMAND "${CMAKE_COMMAND}" -E chdir "${LEVI_PACKAGE_ROOT}" "${CMAKE_COMMAND}" -E tar "cf" "${LEVI_PACKAGE_FILE}" --format=zip "${MOD_ID}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    DEPENDS ${MOD_LIBRARY_NAME}
+    COMMENT "Packaging ${MOD_ID} for LeviLauncher"
+    VERBATIM
+)
