@@ -14,11 +14,24 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 
 if ([string]::IsNullOrWhiteSpace($PreloaderRoot)) {
-    $PreloaderRoot = "D:/a/LiteLDev/LeviLaunchroid/app/src/main/cpp/preloader"
+    $PreloaderRoot = "D:/a/liteldev/LeviLaunchroid/app/src/main/cpp/preloader"
 }
 
 if (-not (Test-Path (Join-Path $PreloaderRoot "src/pl/cpp/Mod.hpp"))) {
     throw "PreloaderRoot must point to app/src/main/cpp/preloader. Current value: $PreloaderRoot"
+}
+
+function Invoke-ConfigGeneration {
+    $configBuildDir = Join-Path $repoRoot "$BuildRoot-config"
+
+    & cmake -S $repoRoot -B $configBuildDir -G $Generator `
+        -DLEVI_PRELOADER_ROOT="$PreloaderRoot" 2>&1 |
+        ForEach-Object { Write-Host $_ }
+
+    & cmake --build $configBuildDir --target levi_generate_config 2>&1 |
+        ForEach-Object { Write-Host $_ }
+
+    return ((Resolve-Path (Join-Path $configBuildDir "generated-config")).Path -replace "\\", "/")
 }
 
 function Resolve-NdkHome {
@@ -56,13 +69,15 @@ function Invoke-ModBuild {
     $ndkHome = Resolve-NdkHome
     $toolchain = Join-Path $ndkHome "build/cmake/android.toolchain.cmake"
     $buildDir = Join-Path $repoRoot "$BuildRoot-$TargetAbi"
+    $generatedConfigDir = Invoke-ConfigGeneration
 
     cmake -S $repoRoot -B $buildDir -G $Generator `
         -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
         -DANDROID_ABI="$TargetAbi" `
         -DANDROID_PLATFORM="$AndroidPlatform" `
         -DANDROID_STL="c++_shared" `
-        -DLEVI_PRELOADER_ROOT="$PreloaderRoot"
+        -DLEVI_PRELOADER_ROOT="$PreloaderRoot" `
+        -DLEVI_PACKAGE_CONFIG_DIR="$generatedConfigDir"
 
     cmake --build $buildDir --target levi_package
 }

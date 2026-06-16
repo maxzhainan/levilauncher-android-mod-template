@@ -29,7 +29,7 @@ and GitHub Actions workflow.
 The default `LEVI_PRELOADER_ROOT` is:
 
 ```text
-D:/a/LiteLDev/LeviLaunchroid/app/src/main/cpp/preloader
+D:/a/liteldev/LeviLaunchroid/app/src/main/cpp/preloader
 ```
 
 If your preloader is in another location, set the environment variable or pass
@@ -39,7 +39,7 @@ the CMake option directly.
 
 ```powershell
 $env:ANDROID_HOME = "C:/Users/<you>/AppData/Local/Android/Sdk"
-$env:LEVI_PRELOADER_ROOT = "D:/a/LiteLDev/LeviLaunchroid/app/src/main/cpp/preloader"
+$env:LEVI_PRELOADER_ROOT = "D:/a/liteldev/LeviLaunchroid/app/src/main/cpp/preloader"
 
 ./scripts/package.ps1 -Abi arm64-v8a
 ```

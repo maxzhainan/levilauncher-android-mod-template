@@ -2,10 +2,6 @@ cmake_minimum_required(VERSION 3.22)
 
 project(levilauncher_android_mod_template LANGUAGES CXX)
 
-if(NOT ANDROID)
-    message(FATAL_ERROR "This template must be built with the Android NDK CMake toolchain.")
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -19,14 +15,105 @@ set(MOD_LIBRARY_NAME "my_mod" CACHE STRING "Native library name without lib pref
 set(MOD_MINECRAFT_VERSIONS "[\"1.21.*\"]" CACHE STRING "Raw JSON array for manifest minecraft_versions")
 set(MOD_ICON "" CACHE STRING "Optional package-relative icon path, such as icon.png")
 
-set(DEFAULT_LEVI_PRELOADER_ROOT "D:/a/LiteLDev/LeviLaunchroid/app/src/main/cpp/preloader")
-if(DEFINED ENV{LEVI_PRELOADER_ROOT} AND NOT "$ENV{LEVI_PRELOADER_ROOT}" STREQUAL "")
+set(DEFAULT_LEVI_PRELOADER_ROOT "D:/a/liteldev/LeviLaunchroid/app/src/main/cpp/preloader")
+if(NOT DEFINED LEVI_PRELOADER_ROOT AND DEFINED ENV{LEVI_PRELOADER_ROOT} AND NOT "$ENV{LEVI_PRELOADER_ROOT}" STREQUAL "")
     set(DEFAULT_LEVI_PRELOADER_ROOT "$ENV{LEVI_PRELOADER_ROOT}")
 endif()
 set(LEVI_PRELOADER_ROOT "${DEFAULT_LEVI_PRELOADER_ROOT}" CACHE PATH "Path to LeviLaunchroid preloader root")
 
 if(NOT EXISTS "${LEVI_PRELOADER_ROOT}/src/pl/cpp/Mod.hpp")
     message(FATAL_ERROR "LEVI_PRELOADER_ROOT must point to app/src/main/cpp/preloader")
+endif()
+
+include(FetchContent)
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+FetchContent_Declare(
+    boost_pfr
+    GIT_REPOSITORY https://github.com/boostorg/pfr.git
+    GIT_TAG boost-1.88.0
+)
+FetchContent_Declare(
+    magic_enum
+    GIT_REPOSITORY https://github.com/Neargye/magic_enum.git
+    GIT_TAG v0.9.7
+)
+FetchContent_MakeAvailable(nlohmann_json boost_pfr magic_enum)
+
+if(NOT ANDROID)
+    set(LEVI_GENERATED_CONFIG_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated-config")
+
+    add_executable(levi_config_generator
+        src/config_generator.cpp
+        src/mod/Config.cpp
+    )
+
+    target_include_directories(levi_config_generator
+        PRIVATE
+            src
+            "${LEVI_PRELOADER_ROOT}/src"
+    )
+
+    target_compile_definitions(levi_config_generator PRIVATE PL_CONFIG_NO_RUNTIME)
+    target_link_libraries(levi_config_generator PRIVATE
+        nlohmann_json::nlohmann_json
+        Boost::pfr
+        magic_enum::magic_enum
+    )
+
+    add_custom_target(levi_generate_config
+        COMMAND levi_config_generator "${LEVI_GENERATED_CONFIG_DIR}"
+        DEPENDS levi_config_generator
+        COMMENT "Generating config.json and config.schema.json"
+        VERBATIM
+    )
+
+    add_executable(levi_config_tests
+        src/config_tests.cpp
+        src/mod/Config.cpp
+    )
+
+    target_include_directories(levi_config_tests
+        PRIVATE
+            src
+            "${LEVI_PRELOADER_ROOT}/src"
+    )
+
+    target_compile_definitions(levi_config_tests PRIVATE PL_CONFIG_NO_RUNTIME)
+    target_link_libraries(levi_config_tests PRIVATE
+        nlohmann_json::nlohmann_json
+        Boost::pfr
+        magic_enum::magic_enum
+    )
+
+    enable_testing()
+    add_test(NAME levi_config_tests COMMAND levi_config_tests)
+
+    return()
+endif()
+
+if(NOT DEFINED LEVI_PACKAGE_CONFIG_DIR)
+    set(LEVI_PACKAGE_CONFIG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/config" CACHE PATH
+        "Directory containing config.json and config.schema.json to package")
+endif()
+
+get_filename_component(LEVI_PACKAGE_CONFIG_DIR "${LEVI_PACKAGE_CONFIG_DIR}" ABSOLUTE)
+set(LEVI_PACKAGE_CONFIG_JSON "${LEVI_PACKAGE_CONFIG_DIR}/config.json")
+set(LEVI_PACKAGE_CONFIG_SCHEMA "${LEVI_PACKAGE_CONFIG_DIR}/config.schema.json")
+
+if(NOT IS_DIRECTORY "${LEVI_PACKAGE_CONFIG_DIR}")
+    message(FATAL_ERROR "LEVI_PACKAGE_CONFIG_DIR must be a directory: ${LEVI_PACKAGE_CONFIG_DIR}")
+endif()
+
+if(NOT EXISTS "${LEVI_PACKAGE_CONFIG_JSON}")
+    message(FATAL_ERROR "LEVI_PACKAGE_CONFIG_DIR must contain config.json: ${LEVI_PACKAGE_CONFIG_JSON}")
+endif()
+
+if(NOT EXISTS "${LEVI_PACKAGE_CONFIG_SCHEMA}")
+    message(FATAL_ERROR "LEVI_PACKAGE_CONFIG_DIR must contain config.schema.json: ${LEVI_PACKAGE_CONFIG_SCHEMA}")
 endif()
 
 if(NOT CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a" AND
@@ -36,6 +123,7 @@ endif()
 
 add_library(${MOD_LIBRARY_NAME} SHARED
     src/main.cpp
+    src/mod/Config.cpp
     src/mod/MyMod.cpp
 )
 
@@ -60,7 +148,12 @@ target_link_options(${MOD_LIBRARY_NAME}
 )
 
 find_library(log-lib log REQUIRED)
-target_link_libraries(${MOD_LIBRARY_NAME} PRIVATE ${log-lib})
+target_link_libraries(${MOD_LIBRARY_NAME} PRIVATE
+    ${log-lib}
+    nlohmann_json::nlohmann_json
+    Boost::pfr
+    magic_enum::magic_enum
+)
 
 if(NOT CMAKE_STRIP)
     message(FATAL_ERROR "CMAKE_STRIP is required to strip the generated library.")
@@ -82,6 +175,8 @@ set(LEVI_PACKAGE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/package")
 set(LEVI_PACKAGE_MOD_DIR "${LEVI_PACKAGE_ROOT}/${MOD_ID}")
 set(LEVI_PACKAGE_FILE "${CMAKE_CURRENT_BINARY_DIR}/${MOD_ID}-${MOD_VERSION}-${CMAKE_ANDROID_ARCH_ABI}.levipack")
 set(LEVI_PACKAGE_ICON_COMMAND)
+set(LEVI_PACKAGE_CONFIG_COMMAND
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${LEVI_PACKAGE_CONFIG_DIR}" "${LEVI_PACKAGE_MOD_DIR}/config")
 
 if(NOT MOD_ICON STREQUAL "")
     if(IS_ABSOLUTE "${MOD_ICON}")
@@ -112,6 +207,7 @@ add_custom_target(levi_package
     COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:${MOD_LIBRARY_NAME}>" "${LEVI_PACKAGE_MOD_DIR}/lib${MOD_LIBRARY_NAME}.so"
     COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_BINARY_DIR}/manifest.json" "${LEVI_PACKAGE_MOD_DIR}/manifest.json"
     ${LEVI_PACKAGE_ICON_COMMAND}
+    ${LEVI_PACKAGE_CONFIG_COMMAND}
     COMMAND "${CMAKE_COMMAND}" -E chdir "${LEVI_PACKAGE_ROOT}" "${CMAKE_COMMAND}" -E tar "cf" "${LEVI_PACKAGE_FILE}" --format=zip "${MOD_ID}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     DEPENDS ${MOD_LIBRARY_NAME}
