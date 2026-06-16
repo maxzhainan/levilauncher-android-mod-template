@@ -71,27 +71,6 @@ if(NOT ANDROID)
         VERBATIM
     )
 
-    add_executable(levi_config_tests
-        src/config_tests.cpp
-        src/mod/Config.cpp
-    )
-
-    target_include_directories(levi_config_tests
-        PRIVATE
-            src
-            "${LEVI_PRELOADER_ROOT}/src"
-    )
-
-    target_compile_definitions(levi_config_tests PRIVATE PL_CONFIG_NO_RUNTIME)
-    target_link_libraries(levi_config_tests PRIVATE
-        nlohmann_json::nlohmann_json
-        Boost::pfr
-        magic_enum::magic_enum
-    )
-
-    enable_testing()
-    add_test(NAME levi_config_tests COMMAND levi_config_tests)
-
     return()
 endif()
 

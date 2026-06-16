@@ -2,8 +2,6 @@
 
 #include <filesystem>
 
-#include <magic_enum/magic_enum.hpp>
-
 #include "pl/cpp/Config.hpp"
 #include "pl/cpp/Mod.hpp"
 
@@ -45,7 +43,6 @@ bool MyMod::load() {
     config = configFile.value();
 
     self.getLogger().info("Loaded {} from {}", self.getName(), self.getModDir().string());
-    logConfigSummary();
     return true;
 }
 
@@ -56,9 +53,7 @@ bool MyMod::enable() {
         return true;
     }
 
-    if (config.hud.showMessage) {
-        getSelf().getLogger().info("Config message [{}]: {}", magic_enum::enum_name(config.profile), config.hud.message);
-    }
+    getSelf().getLogger().info("Config message: {}", config.message);
     return true;
 }
 
@@ -72,11 +67,6 @@ bool MyMod::unload() {
     getSelf().getLogger().debug("Unloading...");
     // Release load-time resources here.
     return true;
-}
-
-void MyMod::logConfigSummary() const {
-    getSelf().getLogger().info("Config summary: enabled={}, profile={}, features={}, tags={}",
-                               config.enabled, magic_enum::enum_name(config.profile), config.features.size(), config.tags.size());
 }
 
 } // namespace my_mod

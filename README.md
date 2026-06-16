@@ -1,8 +1,8 @@
 # LeviLauncher Android Mod Template
 
 This is a CMake template for LeviLauncher Android native mods. It includes a
-ready-to-use `manifest.json`, CMake project, sample `MyMod`, packaging script,
-and GitHub Actions workflow.
+ready-to-use `manifest.json`, CMake project, minimal `MyMod`, packaging script,
+typed config generation, and GitHub Actions workflow.
 
 ## Project Layout
 
@@ -12,8 +12,10 @@ and GitHub Actions workflow.
 ├── manifest.json.in
 ├── scripts/package.ps1
 └── src
+    ├── config_generator.cpp
     ├── main.cpp
     └── mod
+        ├── Config.cpp
         ├── MyMod.cpp
         └── MyMod.h
 ```
@@ -123,3 +125,23 @@ Common APIs:
 
 Use `getDataDir()` and `getConfigDir()` for your mod's own data and config
 files.
+
+## Typed Config
+
+The template includes a minimal typed config in `src/mod/MyMod.h`:
+
+```cpp
+struct ModConfig {
+    int version = 1;
+    bool enabled = true;
+    std::string message = "Hello from My Mod";
+};
+```
+
+`MyMod::load()` uses `pl::config::ConfigFile<ModConfig>` to create and update
+`config/config.json`. The package script runs `src/config_generator.cpp` before
+Android compilation and includes generated `config.json` and
+`config.schema.json` in the `.levipack`.
+
+Keep this config small for your starter mod. Move larger examples, advanced
+schema coverage, or behavior tests into a separate project.
