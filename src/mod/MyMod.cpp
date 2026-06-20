@@ -5,15 +5,12 @@
 #include <cstdio>
 #include <dlfcn.h>
 #include <filesystem>
-#include <initializer_list>
-#include <sstream>
-
-#include "pl/cpp/Config.hpp"
-#include "pl/cpp/Hook.hpp"
-#include "pl/cpp/Mod.hpp"
+#include <izer// 注意：不 #include "pl/cpp/Hook.hpp"，避免链接 pl_hook
 
 #define SYM_ACTOR_GETPOS  "?getPosition@Actor@@UEA?AVVec3@@XZ"
 #define SYM_EGL_SWAP      "eglSwapBuffers"
+#define SYM_PL_HOOK       "pl_hook"
+#define SYM_PL_UNHOOK     "pl_unhook"
 
 namespace {
 
@@ -28,6 +25,15 @@ void *findSymbolAny(std::initializer_list<const char *> names) {
     }
     return nullptr;
 }
+
+// pl_hook 的函数签名（来自 pl/c/Hook.h）
+// int pl_hook(void *target, void *detour, void **original, int priority);
+using PlHookFn   = int  (*)(void *, void *, void **, int);
+using PlUnhookFn = int  (*)(void *, void *);
+
+// 运行时解析到的 hook 函数指针
+PlHookFn   g_plHook   = nullptr;
+PlUnhookFn g_plUnhook = nullptr;
 
 } // anonymous namespace
 
@@ -69,6 +75,16 @@ bool MyMod::enable() {
     if (!config.enabled) {
         s.getLogger().info("[MiniMap] disabled by config");
         return true;
+    }
+
+    // 运行时解析 pl_hook / pl_unhook（由 preloader 提供）
+    g_plHook   = reinterpret_cast<PlHookFn>(findSymbol(SYM_PL_HOOK));
+    g_plUnhook = reinterpret_cast<PlUnhookFn>(findSymbol(SYM_PL_UNHOOK));
+    if (!g_plHook || !g_plUnhook) {
+        s.getLogger().warn("[MiniMap] pl_hook/pl_unhook NOT FOUND — hooks disabled");
+    } else {
+        s.getLogger().info("[MiniMap] pl_hook @ {}, pl_unhook @ {}",
+                           (void *)g_plHook, (void *)g_plUnhook);
     }
 
     void *addrGetPos = findSymbolAny({
@@ -117,14 +133,19 @@ bool MyMod::unload() {
 
 bool MyMod::installHooks() {
     auto &s = getSelf();
+    if (!g_plHook) {
+        s.getLogger().warn("[MiniMap] skip hooks — pl_hook not available");
+        return true;
+    }
 
+    // ① 玩家位置 Hook
     void *addrGetPos = findSymbolAny({
         SYM_ACTOR_GETPOS, "_ZN5Actor11getPositionEv", "_ZN5Actor6getPosEv"
     });
     if (addrGetPos) {
-        int rc = pl::hook::hook(
-            reinterpret_cast<pl::hook::FuncPtr>(addrGetPos),
-            reinterpret_cast<pl::hook::FuncPtr>(
+        int rc = g_plHook(
+            addrGetPos,
+            reinterpret_cast<void *>(
                 +[](void *actor) -> Vec3 {
                     auto &mod = MyMod::getInstance();
                     using Fn = Vec3 (*)(void *);
@@ -133,17 +154,19 @@ bool MyMod::installHooks() {
                     mod.onPlayerPos(result.x, result.y, result.z, 0.0f);
                     return result;
                 }),
-            reinterpret_cast<pl::hook::FuncPtr *>(&origPos),
-            pl::hook::PriorityNormal);
+            &origPos,
+            2  // pl::hook::PriorityNormal = 2
+        );
         if (rc == 0) s.getLogger().info("[MiniMap] pos hook ok");
         else s.getLogger().error("[MiniMap] pos hook failed: {}", rc);
     }
 
+    // ② 渲染 Hook
     void *addrSwap = findSymbol(SYM_EGL_SWAP);
     if (addrSwap) {
-        int rc = pl::hook::hook(
-            reinterpret_cast<pl::hook::FuncPtr>(addrSwap),
-            reinterpret_cast<pl::hook::FuncPtr>(
+        int rc = g_plHook(
+            addrSwap,
+            reinterpret_cast<void *>(
                 +[](void *dpy, void *surf) -> int {
                     auto &mod = MyMod::getInstance();
                     using Fn = int (*)(void *, void *);
@@ -152,8 +175,9 @@ bool MyMod::installHooks() {
                     mod.drawUI();
                     return ret;
                 }),
-            reinterpret_cast<pl::hook::FuncPtr *>(&origRender),
-            pl::hook::PriorityNormal);
+            &origRender,
+            2
+        );
         if (rc == 0) s.getLogger().info("[MiniMap] render hook ok");
     }
 
@@ -161,19 +185,14 @@ bool MyMod::installHooks() {
 }
 
 bool MyMod::uninstallHooks() {
-    if (origPos && hookPos) {
+    if (!g_plUnhook) return true;
+
+    if (origPos) {
         void *addr = findSymbolAny({SYM_ACTOR_GETPOS, "_ZN5Actor11getPositionEv"});
-        if (addr) pl::hook::unhook(
-            reinterpret_cast<pl::hook::FuncPtr>(addr),
-            reinterpret_cast<pl::hook::FuncPtr>(hookPos));
+        if (addr) g_plUnhook(addr, hookPos);
     }
-    if (origRender && hookRender) {
-        void *addr = findSymbol(SYM_EGL_SWAP);
-        if (addr) pl::hook::unhook(
-            reinterpret_cast<pl::hook::FuncPtr>(addr),
-            reinterpret_cast<pl::hook::FuncPtr>(hookRender));
-    }
-    hookPos = hookRender = hookTouch = nullptr;
+    if (origRender) {
+        void *_       Un hookRender = hookTouch = nullptr;
     origPos = origRender = origTouch = nullptr;
     return true;
 }
