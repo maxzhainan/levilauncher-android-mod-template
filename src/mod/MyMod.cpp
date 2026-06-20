@@ -12,9 +12,6 @@
 #include "pl/cpp/Hook.hpp"
 #include "pl/cpp/Mod.hpp"
 
-// ============================================================================
-// dlsym 符号名 — 自动查找，无需手动找偏移量
-// ============================================================================
 #define SYM_ACTOR_GETPOS  "?getPosition@Actor@@UEA?AVVec3@@XZ"
 #define SYM_EGL_SWAP      "eglSwapBuffers"
 
@@ -36,9 +33,6 @@ void *findSymbolAny(std::initializer_list<const char *> names) {
 
 namespace my_mod {
 
-// ============================================================================
-// 单例
-// ============================================================================
 MyMod &MyMod::getInstance() {
     static MyMod instance;
     return instance;
@@ -48,9 +42,6 @@ pl::mod::NativeMod &MyMod::getSelf() const {
     return *pl::mod::NativeMod::current();
 }
 
-// ============================================================================
-// load()
-// ============================================================================
 bool MyMod::load() {
     auto &s = getSelf();
     s.getLogger().debug("[MiniMap] load()");
@@ -67,14 +58,11 @@ bool MyMod::load() {
         config = cf.value();
     }
 
-    config.$minimapOpen = false;
+    minimapOpen = false;
     s.getLogger().info("[MiniMap] load() ok, waypoints={}", config.waypoints.size());
     return true;
 }
 
-// ============================================================================
-// enable()
-// ============================================================================
 bool MyMod::enable() {
     auto &s = getSelf();
 
@@ -83,7 +71,6 @@ bool MyMod::enable() {
         return true;
     }
 
-    // 查找符号
     void *addrGetPos = findSymbolAny({
         SYM_ACTOR_GETPOS,
         "_ZN5Actor11getPositionEv",
@@ -112,35 +99,25 @@ bool MyMod::enable() {
     return true;
 }
 
-// ============================================================================
-// disable()
-// ============================================================================
 bool MyMod::disable() {
     getSelf().getLogger().debug("[MiniMap] disable()");
     {
         std::lock_guard<std::mutex> lk(mtx);
-        config.$minimapOpen = false;
+        minimapOpen = false;
     }
     uninstallHooks();
     return true;
 }
 
-// ============================================================================
-// unload()
-// ============================================================================
 bool MyMod::unload() {
     getSelf().getLogger().debug("[MiniMap] unload()");
     uninstallHooks();
     return true;
 }
 
-// ============================================================================
-// 安装 Hook
-// ============================================================================
 bool MyMod::installHooks() {
     auto &s = getSelf();
 
-    // ① 玩家位置
     void *addrGetPos = findSymbolAny({
         SYM_ACTOR_GETPOS, "_ZN5Actor11getPositionEv", "_ZN5Actor6getPosEv"
     });
@@ -162,7 +139,6 @@ bool MyMod::installHooks() {
         else s.getLogger().error("[MiniMap] pos hook failed: {}", rc);
     }
 
-    // ② 渲染
     void *addrSwap = findSymbol(SYM_EGL_SWAP);
     if (addrSwap) {
         int rc = pl::hook::hook(
@@ -184,9 +160,6 @@ bool MyMod::installHooks() {
     return true;
 }
 
-// ============================================================================
-// 卸载 Hook
-// ============================================================================
 bool MyMod::uninstallHooks() {
     if (origPos && hookPos) {
         void *addr = findSymbolAny({SYM_ACTOR_GETPOS, "_ZN5Actor11getPositionEv"});
@@ -205,9 +178,6 @@ bool MyMod::uninstallHooks() {
     return true;
 }
 
-// ============================================================================
-// 回调
-// ============================================================================
 void MyMod::onPlayerPos(float x, float y, float z, float yaw) {
     std::lock_guard<std::mutex> lk(mtx);
     playerPos = {x, y, z};
@@ -216,30 +186,27 @@ void MyMod::onPlayerPos(float x, float y, float z, float yaw) {
 
 void MyMod::onScreenSize(int w, int h) {
     std::lock_guard<std::mutex> lk(mtx);
-    config.$screenW = w;
-    config.$screenH = h;
+    screenW = w;
+    screenH = h;
 }
 
-// ============================================================================
-// 触摸
-// ============================================================================
 void MyMod::onTouch(float sx, float sy, bool down) {
     if (!down) return;
     std::lock_guard<std::mutex> lk(mtx);
 
-    int W = config.$screenW, H = config.$screenH;
+    int W = screenW, H = screenH;
     if (W == 0 || H == 0) return;
 
     float btnCx = config.btnX * W;
     float btnCy = config.btnY * H;
     float btnR  = config.btnSize * 0.5f;
     if (inCircle(sx, sy, btnCx, btnCy, btnR)) {
-        config.$minimapOpen = !config.$minimapOpen;
-        getSelf().getLogger().info("[MiniMap] {}", config.$minimapOpen ? "OPEN" : "CLOSED");
+        minimapOpen = !minimapOpen;
+        getSelf().getLogger().info("[MiniMap] {}", minimapOpen ? "OPEN" : "CLOSED");
         return;
     }
 
-    if (!config.$minimapOpen) return;
+    if (!minimapOpen) return;
 
     float mcX = W - config.mapSize * 0.5f - 20.0f;
     float mcY = config.mapSize * 0.5f + 60.0f;
@@ -272,11 +239,8 @@ void MyMod::onTouch(float sx, float sy, bool down) {
     addWaypoint(std::string(buf), wx, playerPos.y, wz);
 }
 
-// ============================================================================
-// 屏幕→世界
-// ============================================================================
 void MyMod::screenToWorld(float sx, float sy, float &wx, float &wz) {
-    int W = config.$screenW, H = config.$screenH;
+    int W = screenW, H = screenH;
     float mcX = W - config.mapSize * 0.5f - 20.0f;
     float mcY = config.mapSize * 0.5f + 60.0f;
     float dx = (sx - mcX) * config.mapScale;
@@ -292,12 +256,9 @@ void MyMod::screenToWorld(float sx, float sy, float &wx, float &wz) {
     }
 }
 
-// ============================================================================
-// 绘制
-// ============================================================================
 void MyMod::drawUI() {
     std::lock_guard<std::mutex> lk(mtx);
-    int W = config.$screenW, H = config.$screenH;
+    int W = screenW, H = screenH;
     if (W == 0 || H == 0) return;
 
     float bx = config.btnX * W;
@@ -307,7 +268,7 @@ void MyMod::drawUI() {
     drawFillCircle(bx, by, br, 50, 50, 50, ba);
     drawCircle(bx, by, br, 180, 180, 180, ba);
     float sq = br * 0.35f;
-    if (config.$minimapOpen) {
+    if (minimapOpen) {
         drawFillCircle(bx - sq, by - sq, br * 0.12f, 255, 60, 60, 200);
         drawFillCircle(bx + sq, by - sq, br * 0.12f, 255, 60, 60, 200);
         drawFillCircle(bx - sq, by + sq, br * 0.12f, 255, 60, 60, 200);
@@ -316,7 +277,7 @@ void MyMod::drawUI() {
         drawFillCircle(bx, by, br * 0.2f, 100, 200, 255, 200);
     }
 
-    if (!config.$minimapOpen) return;
+    if (!minimapOpen) return;
 
     float mx = W - config.mapSize * 0.5f - 20.0f;
     float my = config.mapSize * 0.5f + 60.0f;
@@ -361,9 +322,6 @@ void MyMod::drawUI() {
     }
 }
 
-// ============================================================================
-// 传送点管理
-// ============================================================================
 void MyMod::addWaypoint(const std::string &name, float x, float y, float z) {
     std::lock_guard<std::mutex> lk(mtx);
     config.waypoints.push_back({name, x, y, z, 0, "#FF4444"});
@@ -384,21 +342,11 @@ void MyMod::teleportToWaypoint(const Waypoint &wp) {
         wp.name, wp.x, wp.y, wp.z);
 }
 
-// ============================================================================
-// 保存配置
-// ============================================================================
 void MyMod::saveCfg() {
-    ModConfig save = config;
-    save.$minimapOpen = false;
-    save.$screenW = 1080;
-    save.$screenH = 1920;
-    pl::config::ConfigFile<ModConfig> cf(save);
+    pl::config::ConfigFile<ModConfig> cf(config);
     cf.save();
 }
 
-// ============================================================================
-// 小工具
-// ============================================================================
 bool MyMod::inCircle(float px, float py, float cx, float cy, float r) {
     return (px - cx) * (px - cx) + (py - cy) * (py - cy) <= r * r;
 }
@@ -416,7 +364,6 @@ bool MyMod::hexToRGB(const std::string &h, uint8_t &R, uint8_t &G, uint8_t &B) {
     return true;
 }
 
-// 绘制占位 — 需替换为真实 GLES 调用
 void MyMod::drawCircle(float, float, float, uint8_t, uint8_t, uint8_t, uint8_t) {}
 void MyMod::drawFillCircle(float, float, float, uint8_t, uint8_t, uint8_t, uint8_t) {}
 
