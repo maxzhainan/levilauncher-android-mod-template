@@ -23,8 +23,6 @@ set(IMGUI
 )
 add_library(${CMAKE_PROJECT_NAME} SHARED
         main.cpp
-        cursor.h
-        cursor_render.cpp
         stub.h
         AmbientTools.h
         ${IMGUI}
