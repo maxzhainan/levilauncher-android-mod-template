@@ -8,10 +8,6 @@
 
 namespace VirtualMouse {
     std::atomic<bool> visible{false};
-    float cursorX = 0.0f;
-    float cursorY = 0.0f;
-    float screenW = 720.0f;
-    float screenH = 1600.0f;
 }
 
 // ── RenderAPI callback ────────────────────────────────────────
@@ -39,3 +35,4 @@ void init() {
     LOGD("VirtualMouse mod init");
     RenderAPI::Register(OnRender);
 }
+LOGD("SPAM SPAM SPAM SPAM SPAM SPAM SPAM SPAM");
