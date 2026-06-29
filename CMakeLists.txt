@@ -1,70 +1,88 @@
-cmake_minimum_required(VERSION 3.18)
-project(Zaphkiel-imgui LANGUAGES C CXX)
+cmake_minimum_required(VERSION 3.31)
+project(VistualMouse LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -fvisibility=hidden -ffunction-sections -fdata-sections -fexceptions -w")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -fvisibility=hidden -ffunction-sections -fdata-sections -w")
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--gc-sections,--strip-all -s")
+
+include(gamepwnage.cmake)
+include_directories(
+        ${CMAKE_SOURCE_DIR}/ImGui
+        ${CMAKE_SOURCE_DIR}/ImGui/backends
+)
+
+include_directories(gamepwnage/includes)
+
+set(IMGUI
+        ImGui/imgui.cpp
+        ImGui/imgui_draw.cpp
+        ImGui/imgui_tables.cpp
+        ImGui/imgui_widgets.cpp
+        ImGui/backends/imgui_impl_opengl3.cpp
+        ImGui/backends/imgui_impl_android.cpp
+)
+add_library(${CMAKE_PROJECT_NAME} SHARED
+        main.cpp
+        cursor.h
+        cursor_render.cpp
+        stub.h
+        AmbientTools.h
+        ${IMGUI}
+)
+
+
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
+        -g0
+)
+
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
+        C_VISIBILITY_PRESET hidden
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+)
+
+add_library(nise INTERFACE IMPORTED)
+
+
+set_property(TARGET nise PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES
+        ${CMAKE_CURRENT_LIST_DIR}
+)
 
 include(FetchContent)
-
-# ── fmt (required by preloader-android Logger.h) ──────────────────────────────
 FetchContent_Declare(
-    fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG 10.2.1
+    stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        master
 )
-FetchContent_MakeAvailable(fmt)
+FetchContent_MakeAvailable(stb)
 
-# ── preloader-android ─────────────────────────────────────────────────────────
-FetchContent_Declare(
-    preloader_android
-    GIT_REPOSITORY https://github.com/LiteLDev/preloader-android.git
-    GIT_TAG main
-)
-FetchContent_GetProperties(preloader_android)
-if(NOT preloader_android_POPULATED)
-    FetchContent_Populate(preloader_android)
+# stb_image is header-only; create a small impl target
+add_library(stb_image STATIC stb_image_impl.cpp)
+target_include_directories(stb_image PUBLIC ${stb_SOURCE_DIR})
 
-    # Patch Logger.h: replace std::format with fmt (not available on Android NDK)
-    file(READ "${preloader_android_SOURCE_DIR}/src/pl/Logger.h" LOGGER_CONTENT)
-    string(REPLACE "#include <format>"      "#include <fmt/format.h>"  LOGGER_CONTENT "${LOGGER_CONTENT}")
-    string(REPLACE "std::vformat"           "fmt::vformat"             LOGGER_CONTENT "${LOGGER_CONTENT}")
-    string(REPLACE "std::make_format_args"  "fmt::make_format_args"    LOGGER_CONTENT "${LOGGER_CONTENT}")
-    file(WRITE "${preloader_android_SOURCE_DIR}/src/pl/Logger.h" "${LOGGER_CONTENT}")
-
-    add_subdirectory(${preloader_android_SOURCE_DIR} ${preloader_android_BINARY_DIR})
-endif()
-
-target_link_libraries(preloader PUBLIC fmt::fmt)
-
-# ── includes ──────────────────────────────────────────────────────────────────
-include_directories(
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/ImGui
-    ${CMAKE_SOURCE_DIR}/src/ImGui/backends
+set_property(TARGET nise PROPERTY
+        INTERFACE_LINK_LIBRARIES
+        gamepwnage
+        "-L${CMAKE_CURRENT_LIST_DIR}/libs/${ANDROID_ABI} -lnise"
 )
 
-# ── sources ───────────────────────────────────────────────────────────────────
-set(SOURCES
-    src/main.cpp
-    src/ImGui/imgui.cpp
-    src/ImGui/imgui_draw.cpp
-    src/ImGui/imgui_tables.cpp
-    src/ImGui/imgui_widgets.cpp
-    src/ImGui/backends/imgui_impl_opengl3.cpp
-    src/ImGui/backends/imgui_impl_android.cpp
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384"
 )
 
-add_library(Zaphkiel-imgui SHARED ${SOURCES})
 
-target_link_libraries(Zaphkiel-imgui
-    preloader
-    log
-    android
-    EGL
-    GLESv3
-    GLESv2
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${stb_SOURCE_DIR}
+        ${GAMEPWNAGE_DIR}/src
 )
+
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
+        gamepwnage
+        stb_image
+        android
+        log
+        nise
+        GLESv3 EGL)
